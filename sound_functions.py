@@ -35,6 +35,7 @@ def writeWav(output_wav, output_path):
   wavfile.write(output_path, rate, output_wav)
 
 
+
 def toTimeDomain(data):
   
 
@@ -47,7 +48,7 @@ def toTimeDomain(data):
 
 
 
-def getFFT(data, seconds=1,  max_out = 0, frames_per_second = 30, rate=44100):
+def getFFT(data,  frames_per_second = 30, rate=44100):
     fftwidth = int(rate/frames_per_second)
 
 
@@ -87,6 +88,9 @@ def filterBank(data, fs=44100, order=2, n = 20, step=500):
         filtered =  audio_filter.butter_bandpass_filter(data, lowcut, highcut, fs, order=order)
         fb.append(filtered)
     return np.array(fb)
+    
+def unFilter(filtered):
+    return np.sum(filtered, axis=0)
 
 
 def testSoundFunctions():
