@@ -35,35 +35,37 @@ def writeWav(output_wav, output_path):
   wavfile.write(output_path, rate, output_wav)
 
 
-
 def toTimeDomain(data):
   
 
     complex_data = magPhaseToComplex(data)
-
+    complex_data = complex_data.reshape((-1, complex_data.shape[-1]))
+    print('complex data shape', complex_data.shape)
+    
     real_data = np.fft.irfft(complex_data, complex_data.shape[1], axis=1)
-    real_data = np.reshape(real_data, (real_data.shape[0]*real_data.shape[1], 2))
+    real_data = real_data.flatten()
 
     return real_data
 
 
 
-def getFFT(data,  frames_per_second = 30, rate=44100):
-    fftwidth = int(rate/frames_per_second)
+def getFFT(data,  fftwidth, timewidth):
 
-
-    sounddata = np.resize(data, (int( data.shape[0]/fftwidth), fftwidth, 2) )
-  
+    channels = 2 # mag and phase
+    fft_chunks = (int( data.shape[0]/fftwidth))
+    sounddata = np.resize(data, (fft_chunks, fftwidth) )
+    timechunks = int(sounddata.shape[0]/timewidth)
+    sounddata = sounddata[:timechunks*timewidth]
+    
     fftdata = np.fft.fft(sounddata, fftwidth, axis=1)  
 
     mag = np.absolute(fftdata)
     phase = np.angle(fftdata)
 
-
-    # 2 channel output
-    output = np.ndarray((mag.shape[0], mag.shape[1], 2, 2))
-    output[:,:, :, 0] = mag
-    output[:, :,:, 1] = phase
+    output = np.ndarray((timechunks, channels, timewidth, fftwidth))
+    for t in range(timechunks):
+        output[t, 0] = mag[t*timewidth:(t+ 1)*timewidth]
+        output[t, 1] = phase[t*timewidth:(t+ 1)*timewidth]
     return output
 
 
@@ -71,8 +73,8 @@ def getFFT(data,  frames_per_second = 30, rate=44100):
 
 
 def magPhaseToComplex(data):
-    mag = data[:, :, :, 0]
-    phase = data[:, :, :, 1]
+    mag = data[:, 0, :, :]
+    phase = data[:, 1, :, :]
 
     data_complex = mag*np.exp(1.j*phase)
     return data_complex
@@ -95,34 +97,24 @@ def unFilter(filtered):
 
 def testSoundFunctions():
     filename = '../sounds/songsinmyhead/b/01blame.wav'
-    outFilename = 'output/testSoundFunctions.wav'
+
     data = getWav(filename)
     fs = 44100
     data = data[fs*30:fs*35]
+    print('data 0 shape', data.shape)
+    print('data[:20]', data[:20])
+    fftdata = getFFT(data, 100,100)
+    print('fftdata shape', fftdata.shape)
+    # print('FFT max, min, avg:')
+    # print(np.max(fftdata))
+    # print(np.min(fftdata))
+    # print(np.average(fftdata))
 
-    # fftdata = getFFT(data, seconds=0.5, frames_per_second=60, max_out=0)
-    # # print('FFT max, min, avg:')
-    # # print(np.max(fftdata))
-    # # print(np.min(fftdata))
-    # # print(np.average(fftdata))
+    data = toTimeDomain(fftdata)
+    print('data.shape', data.shape)
+    print('data[:20]', data[:20])
 
-    # data = toTimeDomain(np.array(fftdata))
-
-    # lowcut = 440
-    # highcut = 450
-    # fs = 44100
-    # order = 3
-    # data = audio_filter.butter_bandpass_filter(data, lowcut, highcut, fs, order=order)
-    # print('data max', np.max(data))
-    # writeWav(data, outFilename)
-    # print("saved", outFilename)
-    filtered = filterBank(data, n=45, step=200)
-    print('filtered max', np.max(filtered))
-    total = np.sum(filtered, axis=0)
-    print('total shape', total.shape)
-    print('total max', np.max(total))
-    writeWav(filtered[4], 'output/filtered_4.wav')
-    writeWav(total, 'output/total.wav')
+    writeWav(data, 'outputs/test.wav')
 
 
 if __name__ == "__main__":

@@ -18,15 +18,17 @@ import sound_functions as sf
 
 
 rate = 44100
-seconds=0.25
-clip_size = int(seconds*rate)
+# seconds=0.25
+# frames_per_second = 30
+fftwidth = 400
+timewidth = 100
 epochs = 1000
 batch_size = 20
 n_batches = 10
 max_per_file = 200
-files = 5
+files = 10
 input_folder = '../sounds/songsinmyhead/b'
-model_path = './models/music_net_10b.pth'
+model_path = './models/music_net_fft3.pth'
 train_net = True
 load_net = False
 learning_rate = 0.0001
@@ -40,16 +42,15 @@ def shuffle(data, labels, n):
     return data[:n], labels[:n]
 
 
-def loadData(input_folder, files=5, clip_size=1000, filter_n=10, filter_step=500):
+def loadData(input_folder):
     ### loaad data from folder, convert to filtered, shuffle with labels
-    data = np.ndarray((max_per_file*files, filter_n, clip_size))
-    labels = np.ndarray((max_per_file*files))
-    speed = 1 #int(np.random.randint(4) + 1)
-
+    data = None
+    labels = None
 
     for path, _, filenames in os.walk(input_folder):
         file_i = 0
         for i, filename in enumerate(filenames):
+
             if file_i >= files:
                 break
             if filename[-4:] == '.wav':
@@ -57,22 +58,36 @@ def loadData(input_folder, files=5, clip_size=1000, filter_n=10, filter_step=500
                 file_i += 1
                 # label nums are in filenames (for consistency)
                 label_num = int(filename[:2])
-                wavdata = sf.getWav(os.path.join(path, filename))
-                wavdata = wavdata[::speed]
+                wav_data = sf.getWav(os.path.join(path, filename))
+                fft_data = sf.getFFT(wav_data, fftwidth, timewidth)
+                print('fft data shape', fft_data.shape)
+                
+                if data is not None:
+                    data = np.concatenate((data, fft_data))
+                else:
+                    data = fft_data
+
+                label_nums = np.full((fft_data.shape[0]), label_num)
+                if labels is not None:
+                    labels = np.concatenate((labels, label_nums))
+                else:
+                    labels = label_nums
+                # wavdata = wavdata[::speed]
                 #file_start = np.random.randint(wavdata.shape[0] - n_per_file*clip_size - 1)
-                for j in range(max_per_file):
-                    # create filtered clip
-                    start =  j*clip_size#np.random.randint(wavdata.shape[0] - clip_size -1)
-                    end = start + clip_size
-                    clip = wavdata[start:end]
-                    clip_data = sf.filterBank(clip, order=2, n=filter_n, step=filter_step)
-                    data[int(i*max_per_file + j)] = clip_data
-                    labels[int(i*max_per_file + j)] = label_num
+                # for j in range(max_per_file):
+                #     # create filtered clip
+                #     start =  j*clip_size#np.random.randint(wavdata.shape[0] - clip_size -1)
+                #     end = start + clip_size
+                #     clip = wavdata[start:end]
+                #     clip_data = sf.filterBank(clip, order=2, n=filter_n, step=filter_step)
+                #     data[int(i*max_per_file + j)] = clip_data
+                #     labels[int(i*max_per_file + j)] = label_num
                 
             
 
  
 
+    print('data.shape', data.shape)
 
     # shuffle
     p_data = np.random.permutation(data.shape[0])
@@ -100,52 +115,52 @@ def loadData(input_folder, files=5, clip_size=1000, filter_n=10, filter_step=500
 
 
 class MCNet(nn.Module):
-    def __init__(self, clip_size, n_y, filter_n):
+    def __init__(self,  timewidth, fftwidth, n_y, channels=2):
         super(MCNet, self).__init__()
 
-        self.fc1 = nn.Linear(in_features=clip_size, out_features=100)
-        self.conv1 = nn.Conv1d(filter_n, 64, 3, stride=1)
-        self.pool1 = nn.MaxPool1d(3, stride=1)
-        self.conv2 = nn.Conv1d(64, 128, 3, stride=1)
-        self.pool2 = nn.MaxPool1d(3, stride=1)
-        self.fc2 = nn.Linear(92, 200)
-        self.fc3 = nn.Linear(200, 80)
-        self.flatten = nn.Flatten()
-        self.fc4 = nn.Linear(10240, 40)
-        self.fc5 = nn.Linear(40, n_y)
+        self.conv1 = nn.Conv2d(2, 2, 3, stride=2, groups=2)
+        self.pool1 = nn.MaxPool2d(3, 1)
+        self.conv2 = nn.Conv2d(2, 2, 3, 2, groups=2)
+        self.pool2 = nn.MaxPool2d(3, 1)
+        self.fc2 = nn.Linear(4032, 40)
+        self.fc3 = nn.Linear(40, n_y)
 
     def forward(self, x):
        
-        x = torch.relu(self.fc1(x))
         x = torch.relu(self.conv1(x))
         x = torch.relu(self.pool1(x))
         x = torch.relu(self.conv2(x))
         x = torch.relu(self.pool2(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = self.flatten(x)
-        x = self.fc4(x)
-        x = self.fc5(x)
+        x = x.view(-1, self.num_flat_features(x))
+        x = torch.tanh(self.fc2(x))
+        x = self.fc3(x)
 
         return x
 
 
+    def num_flat_features(self, x):
+        size = x.size()[1:]  # all dimensions except the batch dimension
+        num_features = 1
+        for s in size:
+            num_features *= s
+        return num_features
 
 
 
-def train_epoch(x_train, y_train, input_folder, optimizer, net, criterion, clip_size=100, batch_size=10):
+
+
+def train_epoch(net, x_train, y_train, criterion, optimizer,   batch_size=10):
 
     
     running_loss = 0.0
     
-    # print(x_train.shape())
-    # exit()
+
     n_batches = int((list(x_train.size())[0])/batch_size)
     # print('batch_size', batch_size)
     # print('n_batches', n_batches)
     # print('x_train size', x_train.size(), list(x_train.size())[0])
     # print(int((200 - 1)/100))
-    # exit()
+
     for i in range(n_batches):
         # get the inputs; data is a list of [inputs, labels]
         inputs = x_train[batch_size*i:batch_size*(i + 1)]
@@ -210,7 +225,7 @@ def test( net, x_test, y_test, criterion, batch_size=10):
     print('\n')
 
 def loadNet():
-    net = MCNet(clip_size, files + 1, filter_n)
+    net = MCNet(timewidth, fftwidth, files + 1)
 
     print(net)
 
@@ -224,8 +239,8 @@ def main():
 
 
 
-    net = MCNet(clip_size, files + 1, filter_n)
-
+    net = MCNet(timewidth, fftwidth, files + 1)
+    
     print(net)
 
     if load_net:
@@ -235,17 +250,20 @@ def main():
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(net.parameters(), lr=learning_rate)
         
-        x_train, y_train, x_test, y_test = loadData(input_folder, filter_n = filter_n, files=files, clip_size=clip_size, filter_step=500)
+        x_train, y_train, x_test, y_test = loadData(input_folder)
 
-  
+        print('x train shape', x_train.shape)
+        print('y train shape', y_train.shape)
+        print('x test shape', x_test.shape)
+        print('y test shape', y_test.shape)
+
 
         for i in range(epochs):
             c_x_train, c_y_train = shuffle(x_train, y_train, n_batches*batch_size)
 
 
 
-            loss = train_epoch(c_x_train, c_y_train, input_folder, optimizer,
-                    net, criterion, clip_size=clip_size, batch_size = batch_size )
+            loss = train_epoch(net, c_x_train, c_y_train, criterion, optimizer, batch_size = batch_size )
 
             print(i, loss)
 

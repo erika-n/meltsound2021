@@ -53,8 +53,30 @@ def dream(sound, model, iterations, lr):
         print('predicted class', predicted)
         loss = out.norm()
         loss.backward()
-        avg_grad = np.abs(sound.grad.data.cpu().numpy()).mean(axis=0)
-        norm_lr = avg_grad * 1.0/lr
+
+        grad = sound.grad.data.cpu().numpy()
+        # print(np.max(grad), np.min(grad), np.average(grad))
+        # print('grad shape', grad.shape)
+        # print('grad nonzero', np.count_nonzero(grad))
+        # print('grad size', grad.size)
+
+        #avg_grad = np.abs(sound.grad.data.cpu().numpy()).mean(axis=0)
+        norm_lr = grad * lr
+        print('grad max', np.max(grad))
+        print('norm_lr max', np.max(norm_lr))
+        s = sound.cpu().data.numpy()
+        print('sound max', np.max(s))
+
+        # print('norm_lr shape', norm_lr.shape)
+        # print('norm_lr nonzero', np.count_nonzero(norm_lr))
+        # print('norm_lr size', norm_lr.size)
+        # exit()
+
+        # print('avg_grad')
+        # print(avg_grad)
+        # print('norm_lr')
+        # print(norm_lr)
+        # exit()
 
         norm_lr = Tensor(norm_lr)
         sound.data += norm_lr * sound.grad.data
@@ -106,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument("--input_image", type=str, default="images/supermarket.jpg", help="path to input image")
     parser.add_argument("--iterations", default=20, help="number of gradient ascent steps per octave")
     parser.add_argument("--at_layer", default=27, type=int, help="layer at which we modify image to maximize outputs")
-    parser.add_argument("--lr", default=0.0001, help="learning rate")
+    parser.add_argument("--lr", default=1, help="learning rate")
     parser.add_argument("--octave_scale", default=1.4, help="image scale between octaves")
     parser.add_argument("--num_octaves", default=10, help="number of octaves")
     args = parser.parse_args()
@@ -114,25 +136,34 @@ if __name__ == "__main__":
     # # Load image
     # image = Image.open(args.input_image)
     # Load sound
-    sound = sf.getWav('../sounds/songsinmyhead/b/05sleepanddreaming.wav')
-    rate = 44100
-    seconds=0.25
-    clip_size = int(seconds*rate)
-    items= 2
-    start = 44100
-    sound = sound[start:start + clip_size*items]
-    sound = np.random.random_sample((sound.shape))#TMPDEBUG
 
-    filter_n = 30
-    filter_step = 200
+
+    wav_data = sf.getWav('../sounds/songsinmyhead/b/02whichdescribeshowyourfeeling.wav')
+    #wav_data = sf.getWav('../sounds/plum_island/plum_island.wav')
+    
+    wav_data = wav_data[44100:] # trim possible silence
+
+    # # #RANDOM INPUT
+    wav_data = np.random.random_sample((wav_data.shape))
+    wav_data *= 2
+    wav_data -= 1
+    wav_data *= 0.01
+    # print('wav data min max avg', np.min(wav_data), np.max(wav_data), np.average(wav_data))
+
+    # # ZERO INPUT
+    # wav_data = np.zeros(wav_data.shape)
+
+    fft_data = sf.getFFT(wav_data, classifier.fftwidth, classifier.timewidth)
+    sound = fft_data[:5]
+    print('orig sound max', np.max(sound))
  
-    sound = sf.filterBank(sound, order=2, n=filter_n, step=filter_step)
+   # sound = sf.filterBank(sound, order=2, n=filter_n, step=filter_step)
     
     # batch
-    sound = sound.T
-    sound = sound.reshape(items, clip_size, filter_n)
-    sound = np.swapaxes(sound, 1, 2)
-    print('sound shape', sound.shape)
+    # sound = sound.T
+    # sound = sound.reshape(items, clip_size, filter_n)
+    # sound = np.swapaxes(sound, 1, 2)
+    # print('sound shape', sound.shape)
 
     # Define the model
     # network = models.vgg19(pretrained=True)
@@ -161,20 +192,26 @@ if __name__ == "__main__":
 
 
 
-    print('dreamed_sound max, min, avg', np.max(dreamed_sound), np.min(dreamed_sound), np.average(dreamed_sound))
-   
+
     # Save sound
     os.makedirs("outputs", exist_ok=True)
     filename = 'outputs/dreamsound.wav'
 
 
     # undo batching
-    dreamed_sound = np.swapaxes(dreamed_sound, 1, 2)
-    dreamed_sound = dreamed_sound.reshape((-1, filter_n))
-    dreamed_sound = dreamed_sound.T
-    print('dreamed_sound shape', dreamed_sound.shape)
+    # dreamed_sound = np.swapaxes(dreamed_sound, 1, 2)
+    # dreamed_sound = dreamed_sound.reshape((-1, filter_n))
+    # dreamed_sound = dreamed_sound.T
+    # print('dreamed_sound shape', dreamed_sound.shape)
 
 
-    dreamed_sound = np.sum(dreamed_sound, axis=0)
+    # dreamed_sound = np.sum(dreamed_sound, axis=0)
+
+    dreamed_sound = sf.toTimeDomain(dreamed_sound)
+
+    dreamed_sound /= 0.001 + np.max(np.absolute(dreamed_sound))
+    dreamed_sound *= 0.7
+    print('dreamed_sound max, min, avg', np.max(dreamed_sound), np.min(dreamed_sound), np.average(dreamed_sound))
+   
     sf.writeWav(dreamed_sound, filename)
     print('wrote ', filename)
